@@ -35,7 +35,6 @@ public class Main {
             return;
         }
         Path currentPath = Paths.get(currentDir);
-        Document document;
         try {
             Path dirAbsPath = currentPath.toAbsolutePath();
             FilePath filePath = getPaths(dirAbsPath);
@@ -44,27 +43,8 @@ public class Main {
                 LogUtils.print("未找到PDF文件");
                 return;
             }
-            document = new Document(PageSize.A4);
-            String outPath = currentDir + File.separator + "merge.pdf";
-            try (FileOutputStream fos = new FileOutputStream(new File(outPath))) {
-                PdfCopy copy = new PdfCopy(document, fos);
-                // 打开文档准备写入内容
-                document.open();
-                for (Path path : paths) {
-                    PdfReader reader = new PdfReader(new FileInputStream(path.toFile()));
-                    // 获取页数
-                    int numberOfPages = reader.getNumberOfPages();
-                    // pdf的所有页, 从第1页开始遍历, 这里要注意不是0
-                    for (int i = 1; i <= numberOfPages; i++) {
-                        // 把第 i 页读取出来
-                        PdfImportedPage page = copy.getImportedPage(reader, i);
-                        document.newPage();
-                        // 把读取出来的页追加进输出文件里
-                        copy.addPage(page);
-                    }
-                }
-                document.close();
-            }
+            merge(currentDir, paths);
+            // 删除临时文件
             List<Path> imagePaths = filePath.getImagePaths();
             for (Path imageToPdfPath : imagePaths) {
                 Files.deleteIfExists(imageToPdfPath);
@@ -74,6 +54,38 @@ public class Main {
             LogUtils.error("合并失败，错误原因：" + e.getMessage());
         }
         LogUtils.print("合并结束");
+    }
+
+    /**
+     * 合并pdf
+     *
+     * @param outDir 输入目录
+     * @param paths  pdf路径
+     * @throws IOException
+     * @throws DocumentException
+     */
+    private static void merge(String outDir, List<Path> paths) throws IOException, DocumentException {
+        Document document = new Document(PageSize.A4);
+        String outPath = outDir + File.separator + "merge.pdf";
+        try (FileOutputStream fos = new FileOutputStream(new File(outPath))) {
+            PdfCopy copy = new PdfCopy(document, fos);
+            // 打开文档准备写入内容
+            document.open();
+            for (Path path : paths) {
+                PdfReader reader = new PdfReader(new FileInputStream(path.toFile()));
+                // 获取页数
+                int numberOfPages = reader.getNumberOfPages();
+                // pdf的所有页, 从第1页开始遍历, 这里要注意不是0
+                for (int i = 1; i <= numberOfPages; i++) {
+                    // 把第 i 页读取出来
+                    PdfImportedPage page = copy.getImportedPage(reader, i);
+                    document.newPage();
+                    // 把读取出来的页追加进输出文件里
+                    copy.addPage(page);
+                }
+            }
+            document.close();
+        }
     }
 
     /**
@@ -89,7 +101,7 @@ public class Main {
         try {
             paths = Files.walk(dirAbsPath, 1)
                     .filter(e -> SUFFIX_LIST.contains(getSuffix(e)))
-                    .filter(e-> !e.getFileName().toString().contains("merge"))
+                    .filter(e -> !e.getFileName().toString().contains("merge"))
                     .collect(Collectors.toList());
         } catch (IOException e) {
             e.printStackTrace();
