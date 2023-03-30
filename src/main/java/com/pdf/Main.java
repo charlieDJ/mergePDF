@@ -10,7 +10,6 @@ import com.pdf.util.FileUtils;
 import com.pdf.util.LogUtils;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -72,7 +71,7 @@ public class Main {
             // 打开文档准备写入内容
             document.open();
             for (Path path : paths) {
-                PdfReader reader = new PdfReader(new FileInputStream(path.toFile()));
+                PdfReader reader = new PdfReader(Files.newInputStream(path.toFile().toPath()));
                 // 获取页数
                 int numberOfPages = reader.getNumberOfPages();
                 // pdf的所有页, 从第1页开始遍历, 这里要注意不是0
@@ -100,9 +99,11 @@ public class Main {
         FilePath path = new FilePath();
         try {
             paths = Files.walk(dirAbsPath, 1)
+                    .filter(Files::isRegularFile)
                     .filter(e -> SUFFIX_LIST.contains(getSuffix(e)))
                     .filter(e -> !e.getFileName().toString().contains("merge"))
                     .collect(Collectors.toList());
+            LogUtils.print("pdf路径：" + paths);
         } catch (IOException e) {
             e.printStackTrace();
             LogUtils.error(e.getMessage());
