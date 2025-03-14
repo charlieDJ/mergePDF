@@ -8,6 +8,8 @@ import com.itextpdf.text.pdf.PdfWriter;
 import com.pdf.dto.FilePath;
 import com.pdf.util.FileUtils;
 import com.pdf.util.LogUtils;
+import com.pdf.util.WordUtils;
+import org.docx4j.openpackaging.exceptions.Docx4JException;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -23,7 +25,8 @@ import java.util.stream.Stream;
 public class Main {
 
     public static final String PDF_SUFFIX = "pdf";
-    public static final List<String> SUFFIX_LIST = Stream.of("png", "jpg", "pdf").collect(Collectors.toList());
+    public static final String DOCX_SUFFIX = "docx";
+    public static final List<String> SUFFIX_LIST = Stream.of("png", "jpg", "pdf", "docx").collect(Collectors.toList());
     public static final List<String> IMAGE_SUFFIX_LIST = Stream.of("png", "jpg").collect(Collectors.toList());
 
     public static void main(String[] args) {
@@ -33,6 +36,7 @@ public class Main {
             LogUtils.print("未找到当前文件夹");
             return;
         }
+        LogUtils.print("当前路径：" + currentDir);
         Path currentPath = Paths.get(currentDir);
         try {
             Path dirAbsPath = currentPath.toAbsolutePath();
@@ -44,9 +48,9 @@ public class Main {
             }
             merge(currentDir, paths);
             // 删除临时文件
-            List<Path> imagePaths = filePath.getImagePaths();
-            for (Path imageToPdfPath : imagePaths) {
-                Files.deleteIfExists(imageToPdfPath);
+            List<Path> tempPaths = filePath.getImagePaths();
+            for (Path tempPath : tempPaths) {
+                Files.deleteIfExists(tempPath);
             }
         } catch (IOException | DocumentException e) {
             e.printStackTrace();
@@ -68,18 +72,13 @@ public class Main {
         String outPath = outDir + File.separator + "merge.pdf";
         try (FileOutputStream fos = new FileOutputStream(new File(outPath))) {
             PdfCopy copy = new PdfCopy(document, fos);
-            // 打开文档准备写入内容
             document.open();
             for (Path path : paths) {
-                PdfReader reader = new PdfReader(Files.newInputStream(path.toFile().toPath()));
-                // 获取页数
+                PdfReader reader = new PdfReader(Files.newInputStream(path));
                 int numberOfPages = reader.getNumberOfPages();
-                // pdf的所有页, 从第1页开始遍历, 这里要注意不是0
                 for (int i = 1; i <= numberOfPages; i++) {
-                    // 把第 i 页读取出来
                     PdfImportedPage page = copy.getImportedPage(reader, i);
                     document.newPage();
-                    // 把读取出来的页追加进输出文件里
                     copy.addPage(page);
                 }
             }
@@ -88,13 +87,12 @@ public class Main {
     }
 
     /**
-     * 获取图片和pdf的路径
+     * 获取图片、Word 和 PDF 的路径
      *
      * @param dirAbsPath 输入目录
-     * @return 图片和pdf的路径
+     * @return FilePath 对象，包含图片和PDF路径
      */
     private static FilePath getPaths(Path dirAbsPath) {
-        // 获取图像和pdf的路径
         List<Path> paths;
         FilePath path = new FilePath();
         try {
@@ -103,35 +101,42 @@ public class Main {
                     .filter(e -> SUFFIX_LIST.contains(getSuffix(e)))
                     .filter(e -> !e.getFileName().toString().contains("merge"))
                     .collect(Collectors.toList());
-            LogUtils.print("pdf路径：" + paths);
+            LogUtils.print("文件路径：" + paths);
         } catch (IOException e) {
             e.printStackTrace();
             LogUtils.error(e.getMessage());
             return path;
         }
-        // 获取图像的路径和文件名
+
+        // 获取图片的路径并转换为 PDF
         Map<String, Image> imageMap = getImageMap(paths);
-        // 图片转PDF
         List<Path> imageToPdfPaths = imageToPdf(imageMap, dirAbsPath);
-        // 获取pdf的路径
-        paths = paths.stream()
+
+        // 处理 docx 转 PDF
+        List<Path> docxPaths = paths.stream()
+                .filter(e -> DOCX_SUFFIX.equals(getSuffix(e)))
+                .collect(Collectors.toList());
+        List<Path> docxToPdfPaths = convertDocxToPdf(docxPaths, dirAbsPath);
+
+        // 过滤 PDF 文件
+        List<Path> pdfPaths = paths.stream()
                 .filter(e -> PDF_SUFFIX.equals(getSuffix(e)))
                 .collect(Collectors.toList());
-        paths.addAll(imageToPdfPaths);
-        // 按照文件名称排序
-        paths = paths.stream()
+        pdfPaths.addAll(imageToPdfPaths);
+        pdfPaths.addAll(docxToPdfPaths);
+
+        // 按文件名排序
+        pdfPaths = pdfPaths.stream()
                 .sorted(Comparator.comparing(Path::getFileName))
                 .collect(Collectors.toList());
+
         path.setImagePaths(imageToPdfPaths);
-        path.setPdfPaths(paths);
+        path.setPdfPaths(pdfPaths);
         return path;
     }
 
     /**
      * 获取文件后缀
-     *
-     * @param e 文件路径
-     * @return 后缀
      */
     private static String getSuffix(Path e) {
         String filename = e.getFileName().toString();
@@ -141,10 +146,6 @@ public class Main {
 
     /**
      * 获取图片名称和图片
-     * key：图片名称，value：图片
-     *
-     * @param paths 图片的路径
-     * @return 图片名称和图片
      */
     private static Map<String, Image> getImageMap(List<Path> paths) {
         Map<String, Image> imageMap = new HashMap<>();
@@ -164,10 +165,6 @@ public class Main {
 
     /**
      * 图片转PDF
-     *
-     * @param imageMap   图片
-     * @param dirAbsPath 保存图片的路径
-     * @return PDF文件地址
      */
     private static List<Path> imageToPdf(Map<String, Image> imageMap, Path dirAbsPath) {
         List<Path> paths = new ArrayList<>();
@@ -179,17 +176,7 @@ public class Main {
                 PdfWriter.getInstance(doc, new FileOutputStream(path));
                 doc.open();
                 Image image = imageMap.get(filename);
-                float width = image.getWidth();
-                float height = image.getHeight();
-                if (width > height) {
-                    doc.setPageSize(PageSize.A4.rotate());
-                    float percent = 800 / width;
-                    image.scalePercent(percent * 100);
-                } else {
-                    doc.setPageSize(PageSize.A4);
-                    float percent = 500 / width;
-                    image.scalePercent(percent * 100);
-                }
+                image.scaleToFit(PageSize.A4.getWidth(), PageSize.A4.getHeight());
                 doc.newPage();
                 doc.add(image);
             } catch (DocumentException | IOException e) {
@@ -201,4 +188,29 @@ public class Main {
         return paths;
     }
 
+    /**
+     * Word(docx) 转 PDF
+     */
+    private static List<Path> convertDocxToPdf(List<Path> docxPaths, Path dirAbsPath) {
+        List<Path> pdfPaths = new ArrayList<>();
+        for (Path docxPath : docxPaths) {
+            try {
+                String pdfPath = docxPath.toString().replace(".docx", ".pdf");
+//                WordprocessingMLPackage wordMLPackage = WordprocessingMLPackage.load(docxPath.toFile());
+//                FileOutputStream fos = new FileOutputStream(pdfPath);
+//                PdfSettings pdfSettings = new PdfSettings();
+//                PdfConverter.getInstance().convert(wordMLPackage, fos, pdfSettings);
+//                fos.close();
+                String docxPathStr = docxPath.toAbsolutePath().toString();
+                LogUtils.print("docxPath:" + docxPathStr);
+                WordUtils.convertDocxToPdf(docxPathStr, pdfPath);
+                pdfPaths.add(Paths.get(pdfPath));
+            } catch (IOException | Docx4JException e) {
+                e.printStackTrace();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return pdfPaths;
+    }
 }
