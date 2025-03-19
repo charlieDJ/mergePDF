@@ -10,6 +10,9 @@ public class FilePath {
         imagePaths = new ArrayList<>();
     }
 
+    /**
+     * 文件路径
+     */
     private List<Path> pdfPaths;
     private List<Path> imagePaths;
 

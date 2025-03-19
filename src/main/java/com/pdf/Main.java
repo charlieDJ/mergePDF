@@ -29,10 +29,16 @@ public class Main {
     public static final List<String> SUFFIX_LIST = Stream.of("png", "jpg", "pdf", "docx").collect(Collectors.toList());
     public static final List<String> IMAGE_SUFFIX_LIST = Stream.of("png", "jpg").collect(Collectors.toList());
 
+    /**
+     * 文件路径集合
+     * 合并完成后需要删除的文件
+     */
+    private static final List<Path> toDeleteFilePaths = new ArrayList<>();
+
     public static void main(String[] args) {
         LogUtils.print("开始合并PDF");
         String currentDir = FileUtils.getCurrentDir();
-        if (currentDir.length() == 0) {
+        if (currentDir.isEmpty()) {
             LogUtils.print("未找到当前文件夹");
             return;
         }
@@ -83,6 +89,14 @@ public class Main {
                 }
             }
             document.close();
+        } finally {
+            clean();
+        }
+    }
+
+    private static void clean() {
+        for (Path path : toDeleteFilePaths) {
+            org.apache.commons.io.FileUtils.deleteQuietly(path.toFile());
         }
     }
 
@@ -117,6 +131,7 @@ public class Main {
                 .filter(e -> DOCX_SUFFIX.equals(getSuffix(e)))
                 .collect(Collectors.toList());
         List<Path> docxToPdfPaths = convertDocxToPdf(docxPaths, dirAbsPath);
+        toDeleteFilePaths.addAll(docxToPdfPaths);
 
         // 过滤 PDF 文件
         List<Path> pdfPaths = paths.stream()
